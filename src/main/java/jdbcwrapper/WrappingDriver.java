@@ -162,7 +162,8 @@ public class WrappingDriver implements java.sql.Driver {
 	}
 	
 	protected Connection createDefaultWrapper(final Connection connection) {
-		return new WrappedConnection(connection);
+		// By default, don't wrap at all
+		return connection;
 	}
 	
 	private static String rewriteUrl(final String url) {
