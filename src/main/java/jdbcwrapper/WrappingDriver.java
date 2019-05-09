@@ -110,7 +110,7 @@ public class WrappingDriver implements java.sql.Driver {
 	
 	@Override
 	public boolean acceptsURL(final String url) throws SQLException {
-		return true;
+		return needsRewriting(url);
 	}
 	
 	private static boolean needsRewriting(final String url) {
