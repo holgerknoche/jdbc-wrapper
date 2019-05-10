@@ -4,18 +4,20 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 
 import jdbcwrapper.measurement.MeasuringConnection;
 import jdbcwrapper.txmonitoring.AbstractTxMonitoringConnection;
+import jdbcwrapper.txmonitoring.TransactionListener;
 
-public class PostgresMonitoringConnection extends AbstractTxMonitoringConnection implements MeasuringConnection {
+public class PostgresMonitoringConnection extends AbstractTxMonitoringConnection<TransactionListener> implements MeasuringConnection {
 
-	public PostgresMonitoringConnection(final Connection wrappedConnection) {
-		super(wrappedConnection);
+	public PostgresMonitoringConnection(final Connection wrappedConnection, final List<TransactionListener> listeners) {
+		super(wrappedConnection, listeners);
 	}
 
 	@Override
-	protected int getTransactionId() {
+	public int getTransactionId() {
 		try (Statement statement = this.createStatement()) {
 			ResultSet resultSet = statement.executeQuery("select txid_current()");
 
@@ -28,5 +30,5 @@ public class PostgresMonitoringConnection extends AbstractTxMonitoringConnection
 			return 0;
 		}
 	}
-	
+		
 }

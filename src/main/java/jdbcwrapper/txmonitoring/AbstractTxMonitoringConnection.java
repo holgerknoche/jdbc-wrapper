@@ -3,25 +3,18 @@ package jdbcwrapper.txmonitoring;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Savepoint;
 import java.sql.Statement;
+import java.util.List;
 
 import jdbcwrapper.WrappedConnection;
 import jdbcwrapper.measurement.MeasuringConnection;
 import jdbcwrapper.measurement.MeasuringPreparedStatement;
 import jdbcwrapper.measurement.MeasuringStatement;
 
-public abstract class AbstractTxMonitoringConnection extends WrappedConnection implements MeasuringConnection {
+public abstract class AbstractTxMonitoringConnection<L extends TransactionListener> extends WrappedConnection<L> implements MeasuringConnection, TxMonitoringConnection {
 
-	private long startTime;
-
-	private long busyTime;
-	private int statementCount;
-
-	private long statementStartTime;
-
-	public AbstractTxMonitoringConnection(final Connection wrappedConnection) {
-		super(wrappedConnection);
+	public AbstractTxMonitoringConnection(final Connection wrappedConnection, final List<L> listeners) {
+		super(wrappedConnection, listeners);
 	}
 
 	@Override
@@ -33,11 +26,11 @@ public abstract class AbstractTxMonitoringConnection extends WrappedConnection i
 		}
 	}
 
-	private Statement wrapStatement(final Statement statement) {
+	protected Statement wrapStatement(final Statement statement) {
 		return new MeasuringStatement(statement, this);
 	}
 
-	private PreparedStatement wrapPreparedStatement(final PreparedStatement statement) {
+	protected PreparedStatement wrapPreparedStatement(final PreparedStatement statement) {
 		return new MeasuringPreparedStatement(statement, this);
 	}
 
@@ -102,48 +95,22 @@ public abstract class AbstractTxMonitoringConnection extends WrappedConnection i
 		super.rollback();
 	}
 
-	@Override
-	public void rollback(final Savepoint savepoint) throws SQLException {
-		this.onTransactionEnd(false);
-		super.rollback(savepoint);
+	protected void onTransactionStart() {
+		this.notifyConnectionListeners(listener -> listener.onTransactionStart(this));
 	}
 
-	private void onTransactionStart() {
-		int txId = this.getTransactionId();
-		System.out.println(System.identityHashCode(this) + ": Transaction started with id " + txId + ".");
-
-		// Reset the counters after getting the TX id as not to include it in the
-		// figures
-		this.startTime = System.currentTimeMillis();
-		this.busyTime = 0;
-		this.statementCount = 0;
+	protected void onTransactionEnd(final boolean success) {
+		this.notifyConnectionListeners(listener -> listener.onTransactionEnd(this, success));
 	}
-
-	private void onTransactionEnd(final boolean success) {
-		long endTime = System.currentTimeMillis();
-		long duration = endTime - this.startTime;
-
-		float busyPercentage = (float) this.busyTime / (float) duration * 100f;
-
-		System.out.println(System.identityHashCode(this) + ": Transaction ended, success: " + success);
-		System.out.println(String.format("Took %dms, %d statements, %dms busy (%.4f%%).", duration, this.statementCount,
-				this.busyTime, busyPercentage));
-	}
-
-	protected abstract int getTransactionId();
 
 	@Override
 	public void onStatementStart(final Statement statement) {
-		this.statementStartTime = System.currentTimeMillis();
+		// Do nothing by default
 	}
 
 	@Override
 	public void onStatementEnd(final Statement statement) {
-		long statementEndTime = System.currentTimeMillis();
-		long duration = statementEndTime - this.statementStartTime;
-
-		this.statementCount++;
-		this.busyTime += duration;
+		// Do nothing by default
 	}
-
+	
 }

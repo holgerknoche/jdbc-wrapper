@@ -15,16 +15,26 @@ import java.sql.SQLXML;
 import java.sql.Savepoint;
 import java.sql.Statement;
 import java.sql.Struct;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 
-public class WrappedConnection implements Connection {
+public class WrappedConnection<L> implements Connection {
 
 	private final Connection wrappedConnection;
 	
+	private final List<L> listeners;
+	
 	public WrappedConnection(final Connection wrappedConnection) {
+		this(wrappedConnection, null);
+	}
+	
+	public WrappedConnection(final Connection wrappedConnection, final List<L> listeners) {
 		this.wrappedConnection = wrappedConnection;
+		this.listeners = (listeners == null) ? Collections.emptyList() : listeners;
 	}
 
 	@Override
@@ -299,6 +309,10 @@ public class WrappedConnection implements Connection {
 	@Override
 	public int getNetworkTimeout() throws SQLException {
 		return this.wrappedConnection.getNetworkTimeout();
+	}
+	
+	protected void notifyConnectionListeners(final Consumer<? super L> event) {
+		this.listeners.forEach(event);
 	}
 	
 }

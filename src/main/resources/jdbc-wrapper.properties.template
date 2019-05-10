@@ -1,1 +1,2 @@
-postgresql=org.hkn.jdbc.wrapper.postgres.PostgresMonitoringConnection
+postgresql.connection.wrapper=jdbcwrapper.txmonitoring.postgres.PostgresMonitoringConnection
+postgresql.connection.listeners=

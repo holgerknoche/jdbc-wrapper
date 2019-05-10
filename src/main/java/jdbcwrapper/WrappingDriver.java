@@ -10,18 +10,22 @@ import java.sql.DriverManager;
 import java.sql.DriverPropertyInfo;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import jdbcwrapper.util.DriverMetadata;
+import jdbcwrapper.util.DriverMetadataLoader;
+
 public class WrappingDriver implements java.sql.Driver {
 
-	private static final String DRIVER_MAP_NAME = "jdbc-wrapper.properties";
+	private static final String PROPERTIES_NAME = "jdbc-wrapper.properties";
 	
 	private static final String URL_PREFIX = "jdbc:wrapped:";
 	
@@ -35,7 +39,7 @@ public class WrappingDriver implements java.sql.Driver {
 	
 	private static WrappingDriver registeredInstance;
 	
-	private final Map<String, Constructor<?>> typeToWrapperMap;
+	private final Map<String, DriverMetadata> typeToMetadataMap;
 	
 	static {
 		try {
@@ -69,45 +73,21 @@ public class WrappingDriver implements java.sql.Driver {
 	}
 	
 	public WrappingDriver() {
-		this.typeToWrapperMap = this.loadWrapperMap();
+		this.typeToMetadataMap = this.loadMetadata();
 	}
 	
-	private Map<String, Constructor<?>> loadWrapperMap() {			
-		// Load the wrapper map from the properties file
-		Properties properties = new Properties();
+	private Map<String, DriverMetadata> loadMetadata() {			
+		// Load the metadata map from the properties file
 		ClassLoader classLoader = this.getClass().getClassLoader();
 		
-		try (InputStream inputStream = classLoader.getResourceAsStream(DRIVER_MAP_NAME)) {
-			if (inputStream != null) {				
-				properties.load(inputStream);
-			}
+		try (InputStream inputStream = classLoader.getResourceAsStream(PROPERTIES_NAME)) {
+			return new DriverMetadataLoader().loadMetadata(inputStream);
 		} catch (IOException e) {
-			LOGGER.log(Level.WARNING, "Error reading the wrapper map.", e);
-		}
-		
-		// Build the wrapper map from the properties
-		Map<String, Constructor<?>> wrapperMap = new HashMap<>(properties.size());
-		for (Entry<Object, Object> entry : properties.entrySet()) {
-			String name = (String) entry.getKey();
-			String wrapperClassName = (String) entry.getValue();
-			
-			try {
-				Class<?> wrapperClass = Class.forName(wrapperClassName);
-				Constructor<?> constructor = wrapperClass.getConstructor(Connection.class);
-				
-				wrapperMap.put(name, constructor);
-			} catch (ClassNotFoundException e) {
-				LOGGER.log(Level.WARNING, e, () -> "Wrapper class " + wrapperClassName + " not found.");
-			} catch (NoSuchMethodException e) {
-				LOGGER.log(Level.WARNING, () -> "Wrapper class " + wrapperClassName + " does not have a one-argument constructor.");
-			} catch (SecurityException e) {
-				LOGGER.log(Level.WARNING, "Error preparing the wrapper map.", e);
-			}
-		}
-		
-		return wrapperMap;
+			LOGGER.log(Level.WARNING, "Error reading the metadata.", e);
+			return Collections.emptyMap();
+		}				
 	}
-	
+		
 	@Override
 	public boolean acceptsURL(final String url) throws SQLException {
 		return needsRewriting(url);
@@ -145,19 +125,55 @@ public class WrappingDriver implements java.sql.Driver {
 	
 	private Connection createWrappedConnection(final Connection connection, final String type) {
 		if (type == null) {
+			// No type provided, use default wrapper
 			return this.createDefaultWrapper(connection);
 		}
 		
-		Constructor<?> wrapperConstructor = this.typeToWrapperMap.get(type);
-		if (wrapperConstructor == null) {
+		DriverMetadata metadata = this.typeToMetadataMap.get(type);
+		if (metadata == null) {
+			// No metadata provided, use default wrapper
 			return this.createDefaultWrapper(connection);
 		}
+		
+		Constructor<?> wrapperConstructor = metadata.connectionWrapperConstructor;
 		
 		try {
-			return (Connection) wrapperConstructor.newInstance(connection);
-		} catch (InstantiationException | IllegalAccessException | IllegalArgumentException	| InvocationTargetException e) {
+			if (metadata.acceptsConnectionListeners) {
+				// Create connection listeners, if supported
+				List<Object> connectionListeners = this.instantiateConnectionListeners(metadata);
+				return (Connection) wrapperConstructor.newInstance(connection, connectionListeners);
+			} else {
+				// Invoke non-listener constructor
+				return (Connection) wrapperConstructor.newInstance(connection);
+			}
+		} catch (InstantiationException | IllegalAccessException | IllegalArgumentException
+				| InvocationTargetException e) {
 			LOGGER.log(Level.WARNING, e, () -> "Error instantiating the wrapper for type '" + type + "'.");
 			return this.createDefaultWrapper(connection);
+		}
+	}
+	
+	private List<Object> instantiateConnectionListeners(final DriverMetadata metadata) {
+		List<Constructor<?>> listenerConstructors = metadata.connectionListenerConstructors;
+		List<Object> listeners = new ArrayList<>(listenerConstructors.size());
+		
+		for (Constructor<?> listenerConstructor : listenerConstructors) {
+			Object listener = this.instantiateListener(listenerConstructor);
+			
+			if (listener != null) {
+				listeners.add(listener);
+			}
+		}
+		
+		return listeners;
+	}
+	
+	private Object instantiateListener(final Constructor<?> listenerConstructor) {
+		try {
+			return listenerConstructor.newInstance();
+		} catch (InstantiationException | IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+			LOGGER.log(Level.WARNING, e, () -> "Error instantiating listener type " + listenerConstructor.getName() + ", skipping.");
+			return null;
 		}
 	}
 	
